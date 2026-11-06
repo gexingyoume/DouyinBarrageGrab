@@ -335,7 +335,10 @@ namespace BarrageGrab.Proxy
                )
             {
                 e.DataReceived += WebSocket_DataReceived;
-                e.DataSent += WebSocket_DataSent;
+                //注意：不要订阅 DataSent 并使用 WebSocketDecoderReceive 解析发送方向数据。
+                //客户端→服务器帧是掩码帧，且两个方向必须使用各自独立的解码器
+                //(WebSocketDecoderSend)，否则解码器内部缓冲状态会互相污染，
+                //导致偶发 "指定的参数已超出有效值的范围(start)" / "Destination is too short." 异常并丢失弹幕。
                 var urix = new Uri(uri);
                 var roomid = urix.GetQueryParam("room_id");
                 Logger.LogInfo($"订阅到新的弹幕流地址，roomid:{roomid}");
@@ -581,51 +584,6 @@ namespace BarrageGrab.Proxy
 
             hostname = hostname.Trim().ToLower();
             return base.CheckHost(hostname);
-        }
-
-        private void WebSocket_DataSent(object sender, DataEventArgs e)
-        {
-            var args = (SessionEventArgs)sender;
-
-            string hostname = args.HttpClient.Request.RequestUri.Host;
-
-            var processid = args.HttpClient.ProcessId.Value;
-
-            List<byte> messageData = new List<byte>();
-
-            foreach (var frame in args.WebSocketDecoderReceive.Decode(e.Buffer, e.Offset, e.Count))
-            {
-                if (frame.OpCode == WebsocketOpCode.Continuation)
-                {
-                    messageData.AddRange(frame.Data.ToArray());
-                    continue;
-                }
-                else
-                {
-                    //读取完毕
-                    byte[] payload;
-                    if (messageData.Count > 0)
-                    {
-                        messageData.AddRange(frame.Data.ToArray());
-                        payload = messageData.ToArray();
-                        messageData.Clear();
-                    }
-                    else
-                    {
-                        payload = frame.Data.ToArray();
-                    }
-
-                    var str = Encoding.UTF8.GetString(payload);
-
-                    //base.FireWsEvent(new WsMessageEventArgs()
-                    //{
-                    //    ProcessID = processid,
-                    //    HostName = hostname,
-                    //    Payload = payload,
-                    //    ProcessName = base.GetProcessName(processid)
-                    //});
-                }
-            }
         }
 
         //WebSocket 流读取
